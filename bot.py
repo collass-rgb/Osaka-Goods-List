@@ -21,8 +21,16 @@ def clean_content(text):
 
 
 def looks_like_code(text):
-    # 貨號格式：英文字母開頭，後接數字，3碼以上
-    return bool(re.match(r'^[A-Za-z]\d{2,}$', text))
+    # 支援格式：A837、A1080-TK2、A1080-L、A260302
+    # 條件：3碼以上、只含英數字和連字號、不是純中文或純英文單字
+    if len(text) < 2:
+        return False
+    if not re.match(r'^[A-Za-z0-9][A-Za-z0-9\-]+$', text):
+        return False
+    # 必須含有數字（避免把一般英文單字誤判為貨號）
+    if not re.search(r'\d', text):
+        return False
+    return True
 
 
 @client.event
