@@ -20,6 +20,11 @@ def clean_content(text):
     return re.sub(r'<@!?\d+>', '', text).strip()
 
 
+def looks_like_code(text):
+    # 貨號格式：英文字母開頭，後接數字，3碼以上
+    return bool(re.match(r'^[A-Za-z]\d{2,}$', text))
+
+
 @client.event
 async def on_ready():
     print(f"Bot 已上線：{client.user} (ID: {client.user.id})")
@@ -32,17 +37,24 @@ async def on_message(message):
 
     content = clean_content(message.content)
 
+    # AI 模式
     if content.startswith("AI "):
         query = content[3:].strip()
         if query:
             await handle_ai_query(message, query)
         return
 
+    # 舊格式：含「查」字
     if "查" in content:
         code = content.replace("查", "").strip().upper()
         if code:
             await handle_structured_query(message, code)
         return
+
+    # 新格式：直接輸入貨號
+    code = content.strip().upper()
+    if looks_like_code(code):
+        await handle_structured_query(message, code)
 
 
 async def handle_structured_query(message, code):
@@ -51,7 +63,11 @@ async def handle_structured_query(message, code):
     try:
         async with aiohttp.ClientSession() as session:
             params = {"action": "query", "code": code}
-            async with session.get(GAS_WEBAPP_URL, params=params, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.get(
+                GAS_WEBAPP_URL,
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as resp:
                 raw = await resp.text()
                 data = json.loads(raw)
     except Exception as e:
@@ -70,14 +86,26 @@ async def handle_structured_query(message, code):
 
     lines = [f"📦 **貨號 `{code}`** 查詢結果"]
     lines.append("─" * 28)
+
     for r in results:
-        lines.append(
-            f"📅 `{r['出口日']}`　"
-            f"數量：**{int(r['出貨個數'])}**　"
-            f"箱號：`{r['箱號']}`"
-        )
+        date = r['出口日']
+        qty  = int(r['出貨個數'])
+        box  = r['箱號']
+
+        if date == "未排定":
+            date_str = "⏳ 未排定"
+        else:
+            date_str = f"📅 `{date}`"
+
+        if r.get('分批') and r.get('分批總數', 0) > 0:
+            qty_str = f"**{qty}**（分批，總數：{int(r['分批總數'])}）"
+        else:
+            qty_str = f"**{qty}**"
+
+        lines.append(f"{date_str}　數量：{qty_str}　箱號：`{box}`")
+
     lines.append("─" * 28)
-    lines.append(f"✅ 合計出貨：**{int(data.get('total', 0))} 個**")
+    lines.append(f"✅ 已排定合計：**{int(data.get('total', 0))} 個**")
 
     await send_in_chunks(message.channel, lines)
 
@@ -87,17 +115,25 @@ async def handle_ai_query(message, query):
 
     gas_context = ""
     possible_code = query.split()[0].upper() if query.split() else ""
-    if possible_code:
+    if possible_code and looks_like_code(possible_code):
         try:
             async with aiohttp.ClientSession() as session:
                 params = {"action": "query", "code": possible_code}
-                async with session.get(GAS_WEBAPP_URL, params=params, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                async with session.get(
+                    GAS_WEBAPP_URL,
+                    params=params,
+                    timeout=aiohttp.ClientTimeout(total=20)
+                ) as resp:
                     raw = await resp.text()
                     sheet_data = json.loads(raw)
                     if "results" in sheet_data and sheet_data["results"]:
                         gas_context = f"\n\n【試算表資料 - 貨號 {possible_code}】\n"
                         for r in sheet_data["results"]:
-                            gas_context += f"出口日：{r['出口日']}，出貨個數：{r['出貨個數']}，箱號：{r['箱號']}\n"
+                            gas_context += (
+                                f"出口日：{r['出口日']}，"
+                                f"出貨個數：{r['出貨個數']}，"
+                                f"箱號：{r['箱號']}\n"
+                            )
                         gas_context += f"合計：{sheet_data.get('total', 0)} 個\n"
         except Exception:
             pass
