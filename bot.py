@@ -34,18 +34,19 @@ async def on_message(message):
     content = message.content.strip()
 
     # ── AI 模式：「AI 」開頭，呼叫 Claude
-    if content.startswith("AI "):
-        query = content[3:].strip()
+if content.startswith("AI ") or re.sub(r'<@!?\d+>', '', content).strip().startswith("AI "):
+    import re
+    cleaned = re.sub(r'<@!?\d+>', '', content).strip()
+    query = cleaned[3:].strip() if cleaned.startswith("AI ") else cleaned
         if query:
             await handle_ai_query(message, query)
         return
 
-    # ── 制式查詢：包含「查」字，格式為「貨號查」
-    if "查" in content:
-        code = content.replace("查", "").strip()
-        if code:
-            await handle_structured_query(message, code)
-        return
+if "查" in content:
+    # 清除 @ mention 標記（格式為 <@數字>）
+    import re
+    cleaned = re.sub(r'<@!?\d+>', '', content).strip()
+    code = cleaned.replace("查", "").strip().upper()
 
 
 # =====================================================================================
