@@ -21,13 +21,12 @@ def clean_content(text):
 
 
 def looks_like_code(text):
-    # 支援格式：A837、A1080-TK2、A1080-L、A260302
-    # 條件：3碼以上、只含英數字和連字號、不是純中文或純英文單字
+    # 支援：A837、A1080-TK2、A1080-L、A260302
+    # 條件：含數字、只有英數字和連字號、2碼以上
     if len(text) < 2:
         return False
     if not re.match(r'^[A-Za-z0-9][A-Za-z0-9\-]+$', text):
         return False
-    # 必須含有數字（避免把一般英文單字誤判為貨號）
     if not re.search(r'\d', text):
         return False
     return True
@@ -52,15 +51,15 @@ async def on_message(message):
             await handle_ai_query(message, query)
         return
 
-    # 舊格式：含「查」字
+    # 含「查」字
     if "查" in content:
-        code = content.replace("查", "").strip().upper()
+        code = content.replace("查", "").strip()
         if code:
             await handle_structured_query(message, code)
         return
 
-    # 新格式：直接輸入貨號
-    code = content.strip().upper()
+    # 直接輸入貨號（不轉大寫，保留原始格式）
+    code = content.strip()
     if looks_like_code(code):
         await handle_structured_query(message, code)
 
@@ -93,6 +92,12 @@ async def handle_structured_query(message, code):
         return
 
     lines = [f"📦 **貨號 `{code}`** 查詢結果"]
+
+    # 有多筆時顯示備註
+    note = data.get("note", "")
+    if note:
+        lines.append(f"ℹ️ {note}")
+
     lines.append("─" * 28)
 
     for r in results:
@@ -100,10 +105,7 @@ async def handle_structured_query(message, code):
         qty  = int(r['出貨個數'])
         box  = r['箱號']
 
-        if date == "未排定":
-            date_str = "⏳ 未排定"
-        else:
-            date_str = f"📅 `{date}`"
+        date_str = "⏳ 未排定" if date == "未排定" else f"📅 `{date}`"
 
         if r.get('分批') and r.get('分批總數', 0) > 0:
             qty_str = f"**{qty}**（分批，總數：{int(r['分批總數'])}）"
@@ -113,7 +115,9 @@ async def handle_structured_query(message, code):
         lines.append(f"{date_str}　數量：{qty_str}　箱號：`{box}`")
 
     lines.append("─" * 28)
-    lines.append(f"✅ 已排定合計：**{int(data.get('total', 0))} 個**")
+    total = data.get('total', 0)
+    if total > 0:
+        lines.append(f"✅ 出貨合計：**{int(total)} 個**")
 
     await send_in_chunks(message.channel, lines)
 
@@ -122,7 +126,7 @@ async def handle_ai_query(message, query):
     await message.channel.send("🤖 AI 分析中，請稍候...")
 
     gas_context = ""
-    possible_code = query.split()[0].upper() if query.split() else ""
+    possible_code = query.split()[0] if query.split() else ""
     if possible_code and looks_like_code(possible_code):
         try:
             async with aiohttp.ClientSession() as session:
